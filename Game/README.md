@@ -85,9 +85,13 @@ Adding more games to the menu
 Adding a battery pack for portable use
 Improe graphics in all games
 
+## ❓How to use
+
+For detailed setup instructions, examples, and troubleshooting, please refer to the [Help Guide](Help.md).
+
 ## 📜 License
 
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more information. 0
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more information.
 
 ## 👨‍💻 Creator
 
