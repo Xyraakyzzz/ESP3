@@ -85,5 +85,11 @@ Adding more games to the menu
 Adding a battery pack for portable use
 Improe graphics in all games
 
-## Creators
-![Kyxzz]("https://github.com/Xyraakyzzz")
+## 📜 License
+
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for more information. 0
+
+## 👨‍💻 Creator
+
+- **Xyraa Kyys**
+  - GitHub: https://github.com/Xyraakyzzz
