@@ -1,0 +1,3 @@
+Hello World!
+This text is scrolling on the LCD using an SD card.
+By Kai / Kyxzz
