@@ -26,8 +26,9 @@
   ** CS <---> D4 Arduino Nano Every
   ** VCC <---> 3.3V
   * 
-  created 30 November 2021
-  by Octávio Jardim and Francisco Nunes
+  created 30 November 2025
+  Updated 2025
+  by Kai
 */
 
 //----------------------------------
@@ -60,7 +61,7 @@ void setup() {
 
   lcd.clear(); // clear the lcd screen
 
-  card = SD.open("dummy.txt"); // open the file for reading
+  card = SD.open("example.txt"); // open the file for reading
 }
 //----------------------------------
 void loop() {
