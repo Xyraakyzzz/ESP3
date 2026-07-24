@@ -91,5 +91,5 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 
 ## 👨‍💻 Creator
 
-- **Xyraa Kyys**
+- **Xyraa Kyxzz / Kai**
   - GitHub: https://github.com/Xyraakyzzz
