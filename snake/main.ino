@@ -1,535 +1,480 @@
-#include <LiquidCrystal_I2C.h> 
-LiquidCrystal_I2C lcd(0x27,16,2);
-#define       JOYSTICK_X_PIN                 A0
-#define       JOYSTICK_Y_PIN                 A1
-#define       JOYSTICK_Z_PIN                 A2
-#define       NUM_KEYS                       5
-#define       JOYSTICK_RELEASED              0
-#define       JOYSTICK_UP_                   1
-#define       JOYSTICK_DOWN_                 2
-#define       JOYSTICK_LEFT_                 3
-#define       JOYSTICK_RIGHT_                4
-#define       ROWS                           2 
-// number of indicator rows
-#define       levels                         4 
-// difficulty levels
-#define       MAX_SNAKE_LENGTH              25
-// maximum length of snake
+#include <Arduino.h>
+#include <LiquidCrystal_I2C.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
-unsigned long time, timeNow; 
-int gameSpeed;
-boolean skip, gameOver, gameStarted;
-int olddir;
-int selectedLevel;
-byte key=0;
-byte oldkey=0;
+constexpr uint8_t LCD_ADDRESS = 0x27;
+constexpr uint8_t LCD_COLUMNS = 16;
+constexpr uint8_t LCD_ROWS = 2;
+constexpr uint8_t PIXEL_COLUMNS = LCD_COLUMNS * 5;
+constexpr uint8_t PIXEL_ROWS = LCD_ROWS * 8;
+constexpr uint8_t MAX_SNAKE_LENGTH = 25;
+constexpr uint8_t MAX_GAME_SPEED = 25;
+constexpr uint8_t INITIAL_GAME_SPEED = 8;
+constexpr uint8_t CUSTOM_CHAR_COUNT = 8;
+constexpr uint8_t JOYSTICK_X_PIN = A0;
+constexpr uint8_t JOYSTICK_Y_PIN = A1;
+constexpr uint8_t JOYSTICK_Z_PIN = A2;
+constexpr uint8_t JOYSTICK_RELEASED = 255;
+constexpr uint16_t JOYSTICK_DEADZONE = 150;
+constexpr uint16_t JOYSTICK_LOW_THRESHOLD = 350;
+constexpr uint16_t JOYSTICK_HIGH_THRESHOLD = 674;
+constexpr unsigned long JOYSTICK_DEBOUNCE_MS = 35;
+constexpr unsigned long BUTTON_DEBOUNCE_MS = 35;
 
-byte Field[8*ROWS*16];
+LiquidCrystal_I2C lcd(LCD_ADDRESS, LCD_COLUMNS, LCD_ROWS);
 
-
-struct partdef
-{
-  int row,column,dir; 
-  struct partdef *next;
-}; 
-typedef partdef part;
-
-part *head, *tail;
-int collected;
-unsigned int pc,pr;
-
-void drawMatrix()
-{
-  boolean levelz[levels][4][16] = {
-{{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false},
-{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false},
-{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false},
-{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false}},
-
-{{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true},
-{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true},
-{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true},
-{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true}},
-
-{{true,false,false,false,true,false,false,false,false,false,false,true,false,false,false,true},
-{true,false,false,false,false,false,false,false,true,false,false,false,false,false,false,true},
-{true,false,false,false,true,false,false,false,false,false,false,true,false,false,false,true},
-{true,false,false,false,false,false,false,false,true,false,false,false,false,false,false,true}},
-
-{{true,false,true,false,false,false,false,false,false,true,false,false,false,true,false,false},
-{false,false,false,false,true,false,false,true,false,false,false,true,false,false,false,true},
-{true,false,true,false,false,false,false,false,false,true,false,false,false,true,false,false},
-{false,false,false,false,true,false,false,true,false,false,false,true,false,false,false,true}}
+const uint16_t WALL_MASKS[4][2] = {
+  {0x0000, 0x0000},
+  {0x8001, 0x8001},
+  {0x8811, 0x8101},
+  {0x2205, 0x8890}
 };
 
+enum Direction : uint8_t {
+  DIR_UP = 0,
+  DIR_DOWN = 1,
+  DIR_RIGHT = 2,
+  DIR_LEFT = 3
+};
 
+enum GameState : uint8_t {
+  STATE_MENU,
+  STATE_PLAYING,
+  STATE_GAME_OVER
+};
 
-  byte myChar[8];
-  boolean special;
-  int cc=0;
-  
-  if (!gameOver)
-  {
-  ChangeDot(pr, pc, true);
-  
-  for(int r=0;r<ROWS;r++)
-  {    
-    for(int c=0;c<16;c++)
-    {
-      special = false;
-      for(int i=0;i<8;i++)
-      {
-        byte b=B00000;
+struct SnakeSegment {
+  uint8_t row;
+  uint8_t column;
+};
 
-        if ((Field[16 * (r*8+i) + (c*5+0)/5] & (1 << ((c*5+0) % 5))) >> ((c*5+0) % 5)) {b+=B10000; special = true;}
-        if ((Field[16 * (r*8+i) + (c*5+1)/5] & (1 << ((c*5+1) % 5))) >> ((c*5+1) % 5)) {b+=B01000; special = true;}
-        if ((Field[16 * (r*8+i) + (c*5+2)/5] & (1 << ((c*5+2) % 5))) >> ((c*5+2) % 5)) {b+=B00100; special = true;}
-        if ((Field[16 * (r*8+i) + (c*5+3)/5] & (1 << ((c*5+3) % 5))) >> ((c*5+3) % 5)) {b+=B00010; special = true;}
-        if ((Field[16 * (r*8+i) + (c*5+4)/5] & (1 << ((c*5+4) % 5))) >> ((c*5+4) % 5)) {b+=B00001; special = true;}        
- 
-        myChar[i] = b;
+GameState gameState = STATE_MENU;
+SnakeSegment snake[MAX_SNAKE_LENGTH];
+uint8_t snakeLength = 0;
+uint8_t selectedLevel = 0;
+uint8_t currentDirection = DIR_LEFT;
+uint8_t pendingDirection = DIR_LEFT;
+uint8_t gameSpeed = INITIAL_GAME_SPEED;
+uint8_t foodRow = 0;
+uint8_t foodColumn = 0;
+bool foodExists = false;
+unsigned long collected = 0;
+unsigned long lastMoveTime = 0;
 
-      }
-      if (special) 
-      {
-        lcd.createChar(cc, myChar);
-        lcd.setCursor(c,r);
-        lcd.write(byte(cc));
-  cc++;
-      }
-      else 
-      {
-        lcd.setCursor(c,r);
-        if (levelz[selectedLevel][r][c]) lcd.write(255);
-        else lcd.write(128);
+uint8_t field[PIXEL_ROWS * 16];
+uint8_t customGlyphs[CUSTOM_CHAR_COUNT][8];
+
+uint8_t lastJoystickRaw = JOYSTICK_RELEASED;
+uint8_t stableJoystickDirection = JOYSTICK_RELEASED;
+unsigned long joystickRawChangedAt = 0;
+
+uint8_t lastButtonReading = HIGH;
+uint8_t stableButtonState = HIGH;
+unsigned long buttonRawChangedAt = 0;
+
+bool isObstacleCell(uint8_t row, uint8_t column) {
+  if (row >= PIXEL_ROWS || column >= PIXEL_COLUMNS) {
+    return true;
+  }
+
+  uint8_t displayRow = row / 8;
+  uint8_t displayColumn = column / 5;
+  return (WALL_MASKS[selectedLevel][displayRow] & (uint16_t(1) << displayColumn)) != 0;
+}
+
+void setPixel(uint8_t row, uint8_t column) {
+  if (row >= PIXEL_ROWS || column >= PIXEL_COLUMNS) {
+    return;
+  }
+
+  uint16_t index = uint16_t(row) * 16 + column / 5;
+  field[index] |= uint8_t(1U << (column % 5));
+}
+
+void clearField() {
+  memset(field, 0, sizeof(field));
+}
+
+bool snakeContains(uint8_t row, uint8_t column) {
+  for (uint8_t i = 0; i < snakeLength; i++) {
+    if (snake[i].row == row && snake[i].column == column) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool spawnFood() {
+  for (uint16_t attempt = 0; attempt < 256; attempt++) {
+    uint8_t row = random(PIXEL_ROWS);
+    uint8_t column = random(PIXEL_COLUMNS);
+
+    if (!isObstacleCell(row, column) && !snakeContains(row, column)) {
+      foodRow = row;
+      foodColumn = column;
+      foodExists = true;
+      return true;
+    }
+  }
+
+  for (uint8_t row = 0; row < PIXEL_ROWS; row++) {
+    for (uint8_t column = 0; column < PIXEL_COLUMNS; column++) {
+      if (!isObstacleCell(row, column) && !snakeContains(row, column)) {
+        foodRow = row;
+        foodColumn = column;
+        foodExists = true;
+        return true;
       }
     }
-  } 
+  }
+
+  foodExists = false;
+  return false;
+}
+
+uint8_t glyphDistance(const uint8_t *first, const uint8_t *second) {
+  uint8_t distance = 0;
+
+  for (uint8_t row = 0; row < 8; row++) {
+    uint8_t bits = first[row] ^ second[row];
+    while (bits != 0) {
+      distance += bits & 1U;
+      bits >>= 1;
+    }
+  }
+
+  return distance;
+}
+
+void drawMatrix() {
+  clearField();
+
+  for (uint8_t i = 0; i < snakeLength; i++) {
+    setPixel(snake[i].row, snake[i].column);
+  }
+
+  if (foodExists) {
+    setPixel(foodRow, foodColumn);
+  }
+
+  uint8_t customCount = 0;
+
+  for (uint8_t displayRow = 0; displayRow < LCD_ROWS; displayRow++) {
+    for (uint8_t displayColumn = 0; displayColumn < LCD_COLUMNS; displayColumn++) {
+      uint8_t glyph[8] = {0};
+      bool hasPixels = false;
+
+      for (uint8_t pixelRow = 0; pixelRow < 8; pixelRow++) {
+        uint8_t absoluteRow = displayRow * 8 + pixelRow;
+
+        for (uint8_t pixelColumn = 0; pixelColumn < 5; pixelColumn++) {
+          uint8_t absoluteColumn = displayColumn * 5 + pixelColumn;
+          uint16_t index = uint16_t(absoluteRow) * 16 + absoluteColumn / 5;
+          uint8_t mask = uint8_t(1U << (absoluteColumn % 5));
+
+          if (field[index] & mask) {
+            glyph[pixelRow] |= uint8_t(1U << (4 - pixelColumn));
+            hasPixels = true;
+          }
+        }
+      }
+
+      lcd.setCursor(displayColumn, displayRow);
+
+      if (!hasPixels) {
+        lcd.write(uint8_t(isObstacleCell(displayRow * 8, displayColumn * 5) ? 255 : ' '));
+        continue;
+      }
+
+      int8_t selectedGlyph = -1;
+
+      for (uint8_t i = 0; i < customCount; i++) {
+        if (memcmp(customGlyphs[i], glyph, sizeof(glyph)) == 0) {
+          selectedGlyph = i;
+          break;
+        }
+      }
+
+      if (selectedGlyph < 0 && customCount < CUSTOM_CHAR_COUNT) {
+        memcpy(customGlyphs[customCount], glyph, sizeof(glyph));
+        lcd.createChar(customCount, customGlyphs[customCount]);
+        selectedGlyph = customCount;
+        customCount++;
+      }
+
+      if (selectedGlyph < 0) {
+        uint8_t bestDistance = 255;
+        uint8_t bestGlyph = 0;
+
+        for (uint8_t i = 0; i < CUSTOM_CHAR_COUNT; i++) {
+          uint8_t distance = glyphDistance(customGlyphs[i], glyph);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            bestGlyph = i;
+          }
+        }
+
+        selectedGlyph = bestGlyph;
+      }
+
+      lcd.setCursor(displayColumn, displayRow);
+      lcd.write(uint8_t(selectedGlyph));
+    }
   }
 }
 
-void freeList()
-{
-  part *p,*q;
-  p = tail;
-  while (p!=NULL)
-  {
-    q = p;
-    p = p->next;
-    free(q);
-  }
-  head = tail = NULL;
-}
-
-void gameOverFunction()
-{
-  delay(1000);
+void showMenu() {
   lcd.clear();
-  freeList();
-  lcd.setCursor(3,0);
-  lcd.print("Game Over!");
-  lcd.setCursor(4,1);
-  lcd.print("Score: ");
+  lcd.setCursor(1, 0);
+  lcd.print("ARDUINO SNAKE");
+  lcd.setCursor(0, 1);
+  lcd.print("LEVEL: ");
+  lcd.print(selectedLevel + 1);
+  lcd.print("  PRESS");
+}
+
+void showGameOver() {
+  lcd.clear();
+  lcd.setCursor(3, 0);
+  lcd.print("GAME OVER");
+  lcd.setCursor(0, 1);
+  lcd.print("SCORE: ");
   lcd.print(collected);
-  delay(15000);
 }
 
-void growSnake()
-{
-  part *p;
-  p = (part*)malloc(sizeof(part));
-  p->row = tail->row;
-  p->column = tail->column;
-  p->dir = tail->dir;
-  p->next = tail;
-  tail = p;
-}
-
-void newPoint()
-{
-  boolean levelz[levels][4][16] = {
-{{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false},
-{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false},
-{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false},
-{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false}},
-
-{{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true},
-{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true},
-{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true},
-{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true}},
-
-{{true,false,false,false,true,false,false,false,false,false,false,true,false,false,false,true},
-{true,false,false,false,false,false,false,false,true,false,false,false,false,false,false,true},
-{true,false,false,false,true,false,false,false,false,false,false,true,false,false,false,true},
-{true,false,false,false,false,false,false,false,true,false,false,false,false,false,false,true}},
-
-{{true,false,true,false,false,false,false,false,false,true,false,false,false,true,false,false},
-{false,false,false,false,true,false,false,true,false,false,false,true,false,false,false,true},
-{true,false,true,false,false,false,false,false,false,true,false,false,false,true,false,false},
-{false,false,false,false,true,false,false,true,false,false,false,true,false,false,false,true}}
-};
-
-  
-  part *p;
-  p = tail;
-  boolean newp = true;
-  while (newp)
-  {
-    pr = random(8*ROWS);
-    pc = random(80);
-    newp = false;
-    if (levelz[selectedLevel][pr / 8][pc / 5]) newp=true;
-    while (p->next != NULL && !newp) 
-    {
-      if (p->row == pr && p->column == pc) newp = true;
-      p = p->next;
-    }
-  }
-  
-  if (collected < MAX_SNAKE_LENGTH && gameStarted) growSnake();
-}
-
-void moveHead()
-{
-  boolean levelz[levels][4][16] = {
-{{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false},
-{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false},
-{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false},
-{false,false,false,false,false,false,false,false,false,false,false,false,false,false,false,false}},
-
-{{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true},
-{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true},
-{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true},
-{true,false,false,false,false,false,false,false,false,false,false,false,false,false,false,true}},
-
-{{true,false,false,false,true,false,false,false,false,false,false,true,false,false,false,true},
-{true,false,false,false,false,false,false,false,true,false,false,false,false,false,false,true},
-{true,false,false,false,true,false,false,false,false,false,false,true,false,false,false,true},
-{true,false,false,false,false,false,false,false,true,false,false,false,false,false,false,true}},
-
-{{true,false,true,false,false,false,false,false,false,true,false,false,false,true,false,false},
-{false,false,false,false,true,false,false,true,false,false,false,true,false,false,false,true},
-{true,false,true,false,false,false,false,false,false,true,false,false,false,true,false,false},
-{false,false,false,false,true,false,false,true,false,false,false,true,false,false,false,true}}
-};
-  
-  
-  switch(head->dir) // 1 step in direction
-  {
-    case 0: head->row--; break;
-    case 1: head->row++; break;
-    case 2: head->column++; break;
-    case 3: head->column--; break;
-    default : break;
-  }
-  if (head->column >= 80) head->column = 0;
-  if (head->column < 0) head->column = 79;
-  if (head->row >= (8*ROWS)) head->row = 0;
-  if (head->row < 0) head->row = (8*ROWS - 1);
-  
-  if (levelz[selectedLevel][head->row / 8][head->column / 5]) gameOver = true; // wall collision check
-  
-  part *p;
-  p = tail;
-  while (p != head && !gameOver)
-  {
-    if (p->row == head->row && p->column == head->column) gameOver = true;
-    p = p->next;
-  }
-  if (gameOver)
-    gameOverFunction();
-  else
-  {
-  ChangeDot(head->row, head->column, true);
-  
-  if (head->row == pr && head->column == pc)
-  {
-    collected++;
-    if (gameSpeed < 25) gameSpeed+=3;
-    newPoint();
-  }
-  }
-}
-
-void moveAll()
-{
-  part *p;
-  p = tail;
-
-  ChangeDot(p->row, p->column, false);
-  
-  while (p->next != NULL) 
-  {
-    p->row = p->next->row;
-    p->column = p->next->column;
-    p->dir = p->next->dir;
-    p = p->next;
-  }
-  moveHead();
-}
-
-void createSnake(int n) // n = size of snake
-{
-  for (unsigned int i=0;i<(8*ROWS*16);i++)
-    Field[i] = 0;
-    
-  part *p, *q;
-  tail = (part*)malloc(sizeof(part));
-  tail->row = 7;
-  tail->column = 39 + n/2;
-  tail->dir = 3;
-  q = tail;
-  
-  ChangeDot(tail->row, tail->column, true);
-  
-  for (int i = 0; i < n-1; i++)
-  {
-    p = (part*)malloc(sizeof(part));
-    p->row = q->row;
-    p->column = q->column - 1;
-    
-    ChangeDot(p->row, p->column, true);
-    
-    p->dir = q->dir;
-    q->next = p;
-    q = p;
-  }
-  if (n>1)
-  {
-    p->next = NULL;
-    head  = p;
-  }
-  else 
-  {
-    tail->next = NULL;
-    head = tail;
-  }
-}
-
-void startF()
-{
-  byte mySnake[8][8] = 
-{
-{ B00000,
-  B00000,
-  B00011,
-  B00110,
-  B01100,
-  B11000,
-  B00000,
-},
-{ B00000,
-  B11000,
-  B11110,
-  B00011,
-  B00001,
-  B00000,
-  B00000,
-},
-{ B00000,
-  B00000,
-  B00000,
-  B00000,
-  B00000,
-  B11111,
-  B01110,
-},
-{ B00000,
-  B00000,
-  B00011,
-  B01111,
-  B11000,
-  B00000,
-  B00000,
-},
-{ B00000,
-  B11100,
-  B11111,
-  B00001,
-  B00000,
-  B00000,
-  B00000,
-},
-{ B00000,
-  B00000,
-  B00000,
-  B11000,
-  B01101,
-  B00111,
-  B00000,
-},
-{ B00000,
-  B00000,
-  B01110,
-  B11011,
-  B11111,
-  B01110,
-  B00000,
-},
-{ B00000,
-  B00000,
-  B00000,
-  B01000,
-  B10000,
-  B01000,
-  B00000,
-}
-};
-  
-  gameOver = false;
-  gameStarted = false;
-  selectedLevel = 1;
-  lcd.print("Select level: 1");
-  for(int i=0;i<8;i++)
-  {
-    lcd.createChar(i,mySnake[i]);
-    lcd.setCursor(i+4,1);
-    lcd.write(byte(i));
-  }
-
-  lcd.setCursor(2,1);
-  lcd.print("Rees52 PYTHON");
-  delay(15000);
-  
+void startGame() {
+  snakeLength = 3;
+  snake[0] = {7, 40};
+  snake[1] = {7, 39};
+  snake[2] = {7, 38};
   collected = 0;
-  gameSpeed = 8;
-  createSnake(3);
-  time = 0;
+  gameSpeed = INITIAL_GAME_SPEED;
+  currentDirection = DIR_LEFT;
+  pendingDirection = DIR_LEFT;
+  foodExists = false;
+  gameState = STATE_PLAYING;
+
+  if (!spawnFood()) {
+    gameState = STATE_GAME_OVER;
+    showGameOver();
+    return;
+  }
+
+  lastMoveTime = millis();
+  drawMatrix();
 }
 
-void setup()
-{
-  digitalWrite(JOYSTICK_Z_PIN, HIGH);
-    lcd.init();
-    lcd.backlight();
-  startF();
+bool isOppositeDirection(uint8_t first, uint8_t second) {
+  return (first == DIR_UP && second == DIR_DOWN) ||
+         (first == DIR_DOWN && second == DIR_UP) ||
+         (first == DIR_LEFT && second == DIR_RIGHT) ||
+         (first == DIR_RIGHT && second == DIR_LEFT);
 }
 
-void loop()
-{
-  if (!gameOver && !gameStarted) {
-   key = ScanJoyStick(); 
-   if (key != oldkey) {
-     delay(50);  
-     key = ScanJoyStick();
-     if (key != oldkey) {   
-       oldkey = key;
-       if (key > 0)
-       {
-         olddir = head->dir;
-         if (key==JOYSTICK_UP_ && selectedLevel<levels) selectedLevel++;
-         else if (key==JOYSTICK_DOWN_ && selectedLevel>1) selectedLevel--; 
-       }
-     }
-   }
+void finishGame() {
+  gameState = STATE_GAME_OVER;
+  showGameOver();
+}
 
-   else if (digitalRead(JOYSTICK_Z_PIN)) {
-     lcd.clear();
-     selectedLevel--;
-     newPoint();
-     gameStarted = true;
+void moveSnake() {
+  currentDirection = pendingDirection;
+
+  int16_t nextRow = snake[snakeLength - 1].row;
+  int16_t nextColumn = snake[snakeLength - 1].column;
+
+  switch (currentDirection) {
+    case DIR_UP:
+      nextRow--;
+      break;
+    case DIR_DOWN:
+      nextRow++;
+      break;
+    case DIR_RIGHT:
+      nextColumn++;
+      break;
+    case DIR_LEFT:
+      nextColumn--;
+      break;
+  }
+
+  if (nextRow < 0) {
+    nextRow = PIXEL_ROWS - 1;
+  } else if (nextRow >= PIXEL_ROWS) {
+    nextRow = 0;
+  }
+
+  if (nextColumn < 0) {
+    nextColumn = PIXEL_COLUMNS - 1;
+  } else if (nextColumn >= PIXEL_COLUMNS) {
+    nextColumn = 0;
+  }
+
+  uint8_t targetRow = uint8_t(nextRow);
+  uint8_t targetColumn = uint8_t(nextColumn);
+  bool eating = foodExists && targetRow == foodRow && targetColumn == foodColumn;
+  bool willGrow = eating && snakeLength < MAX_SNAKE_LENGTH;
+
+  if (isObstacleCell(targetRow, targetColumn)) {
+    finishGame();
+    return;
+  }
+
+  uint8_t firstBodySegment = willGrow ? 0 : 1;
+
+  for (uint8_t i = firstBodySegment; i < snakeLength; i++) {
+    if (snake[i].row == targetRow && snake[i].column == targetColumn) {
+      finishGame();
+      return;
     }
-   else {
-      lcd.setCursor(14,0);
-      lcd.print(selectedLevel);
+  }
+
+  if (willGrow) {
+    snake[snakeLength].row = targetRow;
+    snake[snakeLength].column = targetColumn;
+    snakeLength++;
+  } else {
+    for (uint8_t i = 0; i + 1 < snakeLength; i++) {
+      snake[i] = snake[i + 1];
+    }
+    snake[snakeLength - 1].row = targetRow;
+    snake[snakeLength - 1].column = targetColumn;
+  }
+
+  if (eating) {
+    collected++;
+    if (gameSpeed < MAX_GAME_SPEED) {
+      uint16_t nextSpeed = uint16_t(gameSpeed) + 3;
+      if (nextSpeed > MAX_GAME_SPEED) {
+        nextSpeed = MAX_GAME_SPEED;
+      }
+      gameSpeed = uint8_t(nextSpeed);
+    }
+
+    if (!spawnFood()) {
+      finishGame();
+      return;
     }
   }
-  
-  else if (!gameOver && gameStarted) {
-   skip = false;
-   
-   key = ScanJoyStick();
-   if (key != oldkey)   
-   {
-     delay(50);  
-     key = ScanJoyStick();
-     if (key != oldkey)    
-     {   
-       oldkey = key;
-       if (key > 0) {
-         olddir = head->dir;
-         if (key==JOYSTICK_RIGHT_ && head->dir!=3) head->dir = 2;
-         else if (key==JOYSTICK_UP_    && head->dir!=1) head->dir = 0;
-         else if (key==JOYSTICK_DOWN_  && head->dir!=0) head->dir = 1;
-         else if (key==JOYSTICK_LEFT_  && head->dir!=2) head->dir = 3;
-         
-         if (olddir != head->dir)
-         {
-           skip = true;
-           delay(1000/gameSpeed);
-           moveAll();
-           drawMatrix();
-         }
-       }
-     }
-   }
-   if (!skip)
-   {
-     timeNow = millis();
-     if (timeNow - time > 1000 / gameSpeed)
-     {
-       moveAll();
-       drawMatrix();
-       time = millis();
-     }
-   }
-  }
-  
-  if(gameOver) {
-   key = ScanJoyStick();// check the joystick
-   if (key != oldkey)   
-   {
-     delay(50);  
-     key = ScanJoyStick();
-     if (key != oldkey)    
-     {   
-       oldkey = key;
-       if (key > 0)// start the game when you move the joystick in any direction
-       {
-          startF();
-       }
-     }
-   }
-   
-  }
-}
-//-----------------------------------
-// check the joystick
-byte ScanJoyStick()
-{
-  byte Direction = JOYSTICK_RELEASED;
-  unsigned int X_Val = analogRead(JOYSTICK_X_PIN);
-  unsigned int Y_Val = analogRead(JOYSTICK_Y_PIN);
-  
-  if ((Y_Val >= 900) && (X_Val >= 400))
-  {
-    //Direction = JOYSTICK_DOWN_;
-    Direction = JOYSTICK_LEFT_;
-  }
-  else if ((Y_Val <= 400) && (X_Val >= 400))
-  {
-    //Direction = JOYSTICK_UP_;
-    Direction = JOYSTICK_RIGHT_;
-  }
-  else if ((Y_Val >= 400) && (X_Val >= 900))
-   {
-    //Direction = JOYSTICK_RIGHT_;
-    Direction = JOYSTICK_DOWN_;
-   }
-  else if ((Y_Val >= 400) && (X_Val <= 400))
-  {
-    //Direction = JOYSTICK_LEFT_;
-    Direction = JOYSTICK_UP_;
-  }
-  
-  return Direction;
-}
-//-----------------------------------------------------
-// making changes to matrix of points on eran
-void ChangeDot(unsigned int RowVal, unsigned int ColVal, boolean NewVal)
-{
-  Field[16 * RowVal + ColVal/5] &= ~(1 << (ColVal % 5));
 
-  if (NewVal)
-    Field[16 * RowVal + ColVal/5] |= 1 << (ColVal % 5);
+  drawMatrix();
+}
+
+uint8_t readJoystickDirection() {
+  int xValue = analogRead(JOYSTICK_X_PIN);
+  int yValue = analogRead(JOYSTICK_Y_PIN);
+  uint16_t xDistance = abs(xValue - 512);
+  uint16_t yDistance = abs(yValue - 512);
+
+  if (xDistance < JOYSTICK_DEADZONE && yDistance < JOYSTICK_DEADZONE) {
+    return JOYSTICK_RELEASED;
+  }
+
+  if (xDistance >= yDistance) {
+    if (xValue < JOYSTICK_LOW_THRESHOLD) {
+      return DIR_UP;
+    }
+    if (xValue > JOYSTICK_HIGH_THRESHOLD) {
+      return DIR_DOWN;
+    }
+  } else {
+    if (yValue < JOYSTICK_LOW_THRESHOLD) {
+      return DIR_RIGHT;
+    }
+    if (yValue > JOYSTICK_HIGH_THRESHOLD) {
+      return DIR_LEFT;
+    }
+  }
+
+  return JOYSTICK_RELEASED;
+}
+
+uint8_t readJoystickEvent(unsigned long now) {
+  uint8_t rawDirection = readJoystickDirection();
+
+  if (rawDirection != lastJoystickRaw) {
+    lastJoystickRaw = rawDirection;
+    joystickRawChangedAt = now;
+  }
+
+  if (now - joystickRawChangedAt >= JOYSTICK_DEBOUNCE_MS && rawDirection != stableJoystickDirection) {
+    stableJoystickDirection = rawDirection;
+    if (stableJoystickDirection != JOYSTICK_RELEASED) {
+      return stableJoystickDirection;
+    }
+  }
+
+  return JOYSTICK_RELEASED;
+}
+
+bool readButtonEvent(unsigned long now) {
+  uint8_t reading = digitalRead(JOYSTICK_Z_PIN);
+
+  if (reading != lastButtonReading) {
+    lastButtonReading = reading;
+    buttonRawChangedAt = now;
+  }
+
+  if (now - buttonRawChangedAt >= BUTTON_DEBOUNCE_MS && reading != stableButtonState) {
+    stableButtonState = reading;
+    return stableButtonState == LOW;
+  }
+
+  return false;
+}
+
+void setup() {
+  pinMode(JOYSTICK_Z_PIN, INPUT_PULLUP);
+  lcd.init();
+  lcd.backlight();
+
+  randomSeed((static_cast<unsigned long>(analogRead(JOYSTICK_X_PIN)) << 20) ^
+             (static_cast<unsigned long>(analogRead(JOYSTICK_Y_PIN)) << 10) ^ micros());
+
+  unsigned long now = millis();
+  joystickRawChangedAt = now;
+  buttonRawChangedAt = now;
+  lastButtonReading = digitalRead(JOYSTICK_Z_PIN);
+  stableButtonState = lastButtonReading;
+  showMenu();
+}
+
+void loop() {
+  unsigned long now = millis();
+  uint8_t directionEvent = readJoystickEvent(now);
+  bool switchPressed = readButtonEvent(now);
+
+  if (gameState == STATE_MENU) {
+    bool levelChanged = false;
+
+    if (directionEvent == DIR_UP && selectedLevel < 3) {
+      selectedLevel++;
+      levelChanged = true;
+    } else if (directionEvent == DIR_DOWN && selectedLevel > 0) {
+      selectedLevel--;
+      levelChanged = true;
+    }
+
+    if (levelChanged) {
+      showMenu();
+    }
+
+    if (switchPressed) {
+      startGame();
+    }
+  } else if (gameState == STATE_PLAYING) {
+    if (directionEvent != JOYSTICK_RELEASED && !isOppositeDirection(directionEvent, currentDirection)) {
+      pendingDirection = directionEvent;
+    }
+
+    unsigned long moveInterval = 1000UL / gameSpeed;
+    if (now - lastMoveTime >= moveInterval) {
+      lastMoveTime = now;
+      moveSnake();
+    }
+  } else if (gameState == STATE_GAME_OVER && directionEvent != JOYSTICK_RELEASED) {
+    gameState = STATE_MENU;
+    showMenu();
+  }
 }
